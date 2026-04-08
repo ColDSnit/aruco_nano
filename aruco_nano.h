@@ -1,11 +1,13 @@
 /**
  * @file aruco_nano.h
  * @brief ArucoNano: A lightweight, header-only ArUco marker detection library.
- * @version 8.0
+ * @version 10.0
+ * @author Rafael Munoz-Salinas
+ * @copyright 2026 Rafael Munoz-Salinas
  *
  * DESCRIPTION:
  * ArucoNano compresses robust ArUco marker detection into a single header file
- * (< 500 lines) that you can simply drop into your project. It is designed for
+ *  that you can simply drop into your project. It is designed for
  * speed and ease of integration.
  *
  * KEY FEATURES:
@@ -35,7 +37,7 @@
   #include "aruco_nano.h"
   int main() {
     cv::Mat image = cv::imread("/path/to/image.png");
-    aruco_nano::Params params;
+    aruco_nano::DetectorParameters params;
     params.dict=cv::aruco::getPredefinedDictionary(cv::aruco::DICT_6X6_1000);
     auto markers=aruco_nano::MarkerDetector::detect(image,params);
     for(const auto &m:markers)
@@ -63,7 +65,7 @@
   #include "aruco_nano.h"
   int main() {
     cv::Mat image = cv::imread("/path/to/image.png");
-    aruco_nano::Params params;
+    aruco_nano::DetectorParameters params;
     params.dict=cv::aruco::getPredefinedDictionary(cv::aruco::DICT_6X6_250);
     params.detectInvertedMarker=true;//white markers in black background
     auto markers=aruco_nano::MarkerDetector::detect(image,params);
@@ -112,7 +114,12 @@
  * - Proper removal of duplicates.
  * - Added OpenCV Dictionary support.
  * - Added wrapper class ArucoDetection for OpenCV API compatibility.
- *
+ * Version 9
+ * - maxTimesRevisited changed to floating value (0,1), so it now is a percentage of the contour's lenght
+ * Version 10
+ * - Added support for multiple dictionaries
+ * - Params renamed to DetectorParameters be more like OpenCV
+ * - Added output of all candidates to be more like OpenCV
  * ----------------------------------------------------------------------------
  * LICENSE
  * ----------------------------------------------------------------------------
@@ -138,14 +145,13 @@
  */
 
 #pragma once
-#define ArucoNanoVersion 8
+#define ArucoNanoVersion 10
 #include <opencv2/imgproc.hpp>
 #include <opencv2/calib3d.hpp>
 #include <opencv2/core/hal/intrin.hpp>
 #include <opencv2/objdetect/aruco_detector.hpp> // We extract the dictionary from here
 #include <vector>
 
-#include <opencv2/highgui.hpp>
 namespace aruco_nano  {
 /**
  * @brief The Marker class is a marker detectable by the library
@@ -156,21 +162,23 @@ class Marker : public std::vector<cv::Point2f>
 public:
     // id of  the marker
     int id=-1;
+    //id of the dict
+    int dict=-1;
     //draws it in a image
     inline void draw(cv::Mat &image,const cv::Scalar color=cv::Scalar(0,0,255))const;
     //given the camera params, returns the Rvec,Tvec indicating the pose of the marker wrt the camer. This is just a call to cv::solvePnp using the  cv::SOLVEPNP_IPPE  method
     inline std::pair<cv::Mat,cv::Mat> estimatePose(cv::Mat cameraMatrix,cv::Mat distCoeffs,double markerSize=1.0f)const;
 };
-struct Params {
+struct DetectorParameters {
     int boxFilterSize=15,thres=3; //values for adaptive thresholding
     int minSize=10;//minimum size of a contour side to be considered as a marker candidate
     int maxAttemptsPerCandidate=5;//number of attempts to identify a candidate by slightly altering the corners
-    cv::aruco::Dictionary dict= cv::aruco::getPredefinedDictionary(cv::aruco::DICT_ARUCO_MIP_36h12);
-    // [1,n] ; maximum number of times a contour can revisit any of its pixels (1 is the minimum which is the starting point)
+    std::vector<cv::aruco::Dictionary> dicts= {cv::aruco::getPredefinedDictionary(cv::aruco::DICT_ARUCO_MIP_36h12)};
+    // [0,1] ; maximum number of times a contour can revisit any of its pixels (1 is the minimum which is the starting point)
     //if you set a high value (std::numeric_limits<int>::max()) the algorithm behaves as the normal moore contour tracer
-    int maxTimesRevisited=4;
+    float maxTimesRevisited=0.05; //1 equals tradional algo,
     /// number of bits of the marker border, i.e. marker border width (default 1).
-    int  markerBorderBits=1; //i do not see this useful. all dicts have 1 border bit but its used in opencv  aruco and I keep it here
+    float  markerBorderBits=1; //i do not see this useful. all dicts have 1 border bit but its used in opencv  aruco and I keep it here
     double errorCorrectionRate=0;//The default 0.6 value in aruco opencv is very dangerous. It causes many false positives.
     double maxErroneousBitsInBorderRate=0;//maximum rate of erroneous bits in the border. Default 0 means no error allowed.
     bool detectInvertedMarker=false;//if the markers are printed in white over black background
@@ -179,14 +187,13 @@ struct Params {
 class MarkerDetector{
 public:
     // The only function you need to call
-    static inline std::vector<Marker> detect(const cv::Mat &img, const Params &params=Params());
+    static inline std::vector<Marker> detect(const cv::Mat &img, const DetectorParameters &params=DetectorParameters(),std::vector<Marker> *candidatesOut=nullptr);
 private:
     static inline Marker sort( const  Marker &marker);
     static inline float  getSubpixelValue(const cv::Mat &im_grey,const cv::Point2f &p);
-    static inline int   getMarkerId(  cv::Mat  candidateBits,int &idx, int &nrotations, const Params &params);
-    static inline int    perimeter(const std::vector<cv::Point2f>& a);
+    static inline int   getMarkerId(  cv::Mat  candidateBits,int &idx, int &nrotations, const DetectorParameters &params,int dictIndex);
     static inline int isInto(const std::vector<cv::Point2f> &a, const std::vector<cv::Point2f> &b) ;
-    static std::vector<std::vector<cv::Point>> visitedAwareTracingContour(cv::Mat &padded, size_t minSize = 1,int maxTimesRevisited=4) ;
+    static std::vector<std::vector<cv::Point>> visitedAwareTracingContour(cv::Mat &padded, size_t minSize = 1,float maxRevisited=0.1) ;
     static int getBorderErrors(const cv::Mat &bits, int markerSize, int borderSize) ;
     static void thres255Adaptive(cv::Mat &in,cv::Mat &out,int off=2,int thres=5);
 };
@@ -194,13 +201,19 @@ private:
 class ArucoDetector{
 public:
     ArucoDetector(){}
-    ArucoDetector(const cv::aruco::Dictionary &dict, const Params &params= {}  ){
+    ArucoDetector(const cv::aruco::Dictionary &dict, const DetectorParameters &params= {}  ){
         _params=params;
-        _params.dict=dict;
+        _params.dicts.push_back(dict);
     }
-    void detectMarkers (cv::InputArray image, cv::OutputArrayOfArrays corners, cv::OutputArray ids) const;
+    ArucoDetector(const std::vector<cv::aruco::Dictionary> &dicts, const DetectorParameters &params= {}  ){
+        _params=params;
+        _params.dicts=dicts;
+    }
+    void detectMarkers (cv::InputArray image, cv::OutputArrayOfArrays corners, cv::OutputArray ids,  cv::OutputArrayOfArrays rejectedImgPoints = cv::noArray()) const;
+    void detectMarkersMultiDict(cv::InputArray image, cv::OutputArrayOfArrays corners, cv::OutputArray ids,
+                                cv::OutputArrayOfArrays rejectedImgPoints = cv::noArray(), cv::OutputArray dictIndices = cv::noArray()) const;
 private:
-    Params _params;
+    DetectorParameters _params;
     void copyVector2Output(std::vector<Marker> &vec, cv::OutputArrayOfArrays out )const ;
 };
 namespace _private {
@@ -247,15 +260,54 @@ int MarkerDetector::isInto(const std::vector<cv::Point2f> &a, const std::vector<
     // Default: Tie or no relative dominance
     return 0;
 }
-void ArucoDetector::detectMarkers(cv::InputArray _image, cv::OutputArrayOfArrays _corners, cv::OutputArray _ids ) const   {
+
+void ArucoDetector::detectMarkersMultiDict(cv::InputArray _image, cv::OutputArrayOfArrays _corners, cv::OutputArray _ids,
+                                           cv::OutputArrayOfArrays _rejectedImgPoints , cv::OutputArray _dictIndices ) const {
     cv::Mat image = _image.getMat();
     CV_Assert(!image.empty());
+    std::vector<Marker> rejectedImgPointsVec;
 
     // 1. Run internal detection logic
-    std::vector<Marker> markers = MarkerDetector::detect(image,_params);
+    std::vector<Marker> markers = MarkerDetector::detect(image,_params,&rejectedImgPointsVec);
 
     // 2. Unpack results into OutputArrayOfArrays
     copyVector2Output(markers, _corners);
+    if( _rejectedImgPoints.needed())
+        copyVector2Output(rejectedImgPointsVec, _rejectedImgPoints);
+
+
+    // 3. Assign to output ids
+    std::vector<int> idsVec;
+    idsVec.reserve(markers.size());
+    for (const auto& m : markers) idsVec.push_back(m.id);
+
+    // Allocate and copy IDs
+    _ids.create((int)idsVec.size(), 1, CV_32SC1);
+    cv::Mat(idsVec).copyTo(_ids);
+
+    //4. Assign dict indices
+    std::vector<int> dictIndicesVec;
+    dictIndicesVec.reserve(markers.size());
+    for (const auto& m : markers) dictIndicesVec.push_back(m.dict);
+    if(_dictIndices.needed()) {
+        _dictIndices.create((int)dictIndicesVec.size(), 1, CV_32SC1);
+        cv::Mat(dictIndicesVec).copyTo(_dictIndices);
+    }
+
+}
+
+void ArucoDetector::detectMarkers(cv::InputArray _image, cv::OutputArrayOfArrays _corners, cv::OutputArray _ids,cv::OutputArrayOfArrays _rejectedImgPoints ) const   {
+    cv::Mat image = _image.getMat();
+    CV_Assert(!image.empty());
+    std::vector<Marker> rejectedImgPointsVec;
+
+    // 1. Run internal detection logic
+    std::vector<Marker> markers = MarkerDetector::detect(image,_params,&rejectedImgPointsVec);
+
+    // 2. Unpack results into OutputArrayOfArrays
+    copyVector2Output(markers, _corners);
+    if( _rejectedImgPoints.needed())
+        copyVector2Output(rejectedImgPointsVec, _rejectedImgPoints);
 
 
     // 3. Assign to output ids
@@ -267,7 +319,7 @@ void ArucoDetector::detectMarkers(cv::InputArray _image, cv::OutputArrayOfArrays
     _ids.create((int)idsVec.size(), 1, CV_32SC1);
     cv::Mat(idsVec).copyTo(_ids);
 }
-std::vector<Marker>  MarkerDetector::detect(const cv::Mat &img, const Params &params ){
+std::vector<Marker>  MarkerDetector::detect(const cv::Mat &img, const DetectorParameters &params,std::vector<Marker> *candidatesOut){
     cv::Mat bwimage,thresImage;
     std::vector<Marker> DetectedMarkers;
     //first, convert to bw
@@ -287,8 +339,16 @@ std::vector<Marker>  MarkerDetector::detect(const cv::Mat &img, const Params &pa
     //cv::findContours(thresImage, contours, cv::noArray(), cv::RETR_LIST, cv::CHAIN_APPROX_NONE);
     int  minSizeSq=params.minSize*params.minSize,minSize4=4*params.minSize;
     contours=visitedAwareTracingContour(thresImage,minSize4,params.maxTimesRevisited);
-    cv::Mat bits(params.dict.markerSize+2,params.dict.markerSize+2,CV_8UC1),bitadaptive(params.dict.markerSize+2,params.dict.markerSize+2,CV_8UC1);
-    ///////////////// for each contour, approx to a rectangle and check bits inside
+
+    //decide where to store the candidates. If candidatesOut is not null, store there, otherwise use a local variable
+    std::vector<Marker> candidateslocal;
+    if(candidatesOut!=nullptr) {
+        candidatesOut->clear();
+    }
+    else{
+        candidatesOut=&candidateslocal;
+    }
+    ///////////////// for each contour, approx to a rectangle
     for (unsigned int i = 0; i < contours.size(); i++)
     {
         // can approximate to a convex rect?
@@ -305,55 +365,78 @@ std::vector<Marker>  MarkerDetector::detect(const cv::Mat &img, const Params &pa
             marker.emplace_back( cv::Point2f( approxCurve[j].x,approxCurve[j].y));
         //sort corner in clockwise direction
         marker=sort(marker);
-        ////// extract the code. Obtain the intensities of the bits using  homography
-        for(int i=0;i<int(params.maxAttemptsPerCandidate) && marker.id==-1;i++){
-            //if not first attempt, we may wanna produce small random alteration of the corners
-            auto marker2=marker;
-            if( i!=0) for(int c=0;c<4;c++) {marker2[c].x+=rand.gaussian(0.75);marker2[c].y+=rand.gaussian(0.75);}//if not first, alter corner location
-            _private::Homographer hom(marker2);
-            for(int r=0;r<bits.rows;r++){
-                for(int c=0;c<bits.cols;c++){
-                    bits.at<uchar>(r,c)=uchar(0.5+getSubpixelValue(bwimage,hom(cv::Point2f(  float(c+0.5) / float(bits.cols) ,  float(r+0.5) / float(bits.rows)  ))));
-                }
-            }
-            if(i==2){ // if not working the first time, try this time adaptive threshold into the bits to improve robustness to lighting
-                thres255Adaptive(bits,bitadaptive);
-                bitadaptive.copyTo(bits);
-            }
-            else{
-                cv::threshold(bits,bits,0,255,cv::THRESH_OTSU);
-            }
-            //now, analyze the inner code to see it if is a marker. If so, rotate to have the points properly sorted
-            int nrotations=0;
-            if(getMarkerId(bits,marker.id,nrotations,params)==0) continue;
-            std::rotate(marker.begin(),marker.begin() + 4 - nrotations,marker.end());
-        }
-        if(marker.id!=-1) DetectedMarkers.push_back(marker);
+        candidatesOut->push_back(marker);
     }
-    /// REMOVAL OF INNER DUPLICATED DETECTIONS OF THE SAME MARKER(INNER AND OUTER BORDER)
-    std::sort(DetectedMarkers.begin(), DetectedMarkers.end(),[](const Marker &a,const Marker &b){return a.id<b.id;});
-    {
-        std::vector<bool> toRemove(DetectedMarkers.size(), false);
-        for (int i = 0; i < int(DetectedMarkers.size()) - 1; i++)
-        {
-            for (int j = i + 1; j < int(DetectedMarkers.size()) && !toRemove[i]; j++)
-            {
-                if (DetectedMarkers[i].id == DetectedMarkers[j].id )
-                {
-                    auto res=isInto(DetectedMarkers[i],DetectedMarkers[j]);
-                    //std::cout<<DetectedMarkers[i].id<<" "<<DetectedMarkers[j].id<< " res: "<<res<<std::endl;
-                    if( res==1)toRemove[i]=true;
-                    else if( res==2)toRemove[j]=true;
 
+
+    //now, for each candidate check bits inside
+    int dictIndex=-1;
+    for(auto dict:params.dicts){
+        dictIndex++;
+        cv::Mat bits(dict.markerSize+2,dict.markerSize+2,CV_8UC1),bitadaptive(dict.markerSize+2,dict.markerSize+2,CV_8UC1);
+
+        for(auto it=candidatesOut->begin();it!=candidatesOut->end();){
+            auto marker=*it;
+
+            ////// extract the code. Obtain the intensities of the bits using  homography
+            for(int i=0;i<int(params.maxAttemptsPerCandidate) && marker.id==-1;i++){
+                //if not first attempt, we may wanna produce small random alteration of the corners
+                auto marker2=marker;
+                if( i!=0) for(int c=0;c<4;c++) {marker2[c].x+=rand.gaussian(0.75);marker2[c].y+=rand.gaussian(0.75);}//if not first, alter corner location
+                _private::Homographer hom(marker2);
+                for(int r=0;r<bits.rows;r++){
+                    for(int c=0;c<bits.cols;c++){
+                        bits.at<uchar>(r,c)=uchar(0.5+getSubpixelValue(bwimage,hom(cv::Point2f(  float(c+0.5) / float(bits.cols) ,  float(r+0.5) / float(bits.rows)  ))));
+                    }
+                }
+                if(i==2){ // if not working the first time, try this time adaptive threshold into the bits to improve robustness to lighting
+                    thres255Adaptive(bits,bitadaptive);
+                    bitadaptive.copyTo(bits);
+                }
+                else{
+                    cv::threshold(bits,bits,0,255,cv::THRESH_OTSU);
+                }
+                //now, analyze the inner code to see it if is a marker. If so, rotate to have the points properly sorted
+                int nrotations=0;
+                if(getMarkerId(bits,marker.id,nrotations,params,dictIndex)==0) continue;
+                std::rotate(marker.begin(),marker.begin() + 4 - nrotations,marker.end());
+            }
+            if(marker.id!=-1) {
+                marker.dict=dictIndex;
+                DetectedMarkers.push_back(marker);
+                //remove from candidate list
+                it=candidatesOut->erase(it);
+            }
+            else it++;//go to next
+        }
+
+        /// REMOVAL OF INNER DUPLICATED DETECTIONS OF THE SAME MARKER(INNER AND OUTER BORDER)
+        std::sort(DetectedMarkers.begin(), DetectedMarkers.end(),[](const Marker &a,const Marker &b){return a.id<b.id;});
+        {
+            std::vector<bool> toRemove(DetectedMarkers.size(), false);
+            for (int i = 0; i < int(DetectedMarkers.size()) - 1; i++)
+            {
+                for (int j = i + 1; j < int(DetectedMarkers.size()) && !toRemove[i]; j++)
+                {
+                    if (DetectedMarkers[i].id == DetectedMarkers[j].id )
+                    {
+                        auto res=isInto(DetectedMarkers[i],DetectedMarkers[j]);
+                        //std::cout<<DetectedMarkers[i].id<<" "<<DetectedMarkers[j].id<< " res: "<<res<<std::endl;
+                        if( res==1)toRemove[i]=true;
+                        else if( res==2)toRemove[j]=true;
+
+                    }
                 }
             }
+            //now remove the marked ones
+            std::vector<Marker>  DetectedMarkers2;
+            for (unsigned int i = 0; i < DetectedMarkers.size(); i++)
+                if (!toRemove[i]) DetectedMarkers2.push_back(DetectedMarkers[i]);
+            DetectedMarkers=DetectedMarkers2;
         }
-        //now remove the marked ones
-        std::vector<Marker>  DetectedMarkers2;
-        for (unsigned int i = 0; i < DetectedMarkers.size(); i++)
-            if (!toRemove[i]) DetectedMarkers2.push_back(DetectedMarkers[i]);
-        DetectedMarkers=DetectedMarkers2;
     }
+
+
     ////// finally subpixel corner refinement
     if(DetectedMarkers.size()>0){
         int halfwsize= 4*float(bwimage.cols)/float(bwimage.cols) +0.5 ;
@@ -367,32 +450,25 @@ std::vector<Marker>  MarkerDetector::detect(const cv::Mat &img, const Params &pa
     }
     return DetectedMarkers;//DONE
 }
-int  MarkerDetector::perimeter(const std::vector<cv::Point2f>& a)
-{
-    int sum = 0;
-    for (size_t i = 0; i < a.size(); i++)
-        sum+=cv::norm( a[i]-a[(i + 1) % a.size()]);
-    return sum;
-}
 /**
  * @brief Tries to identify one candidate given the dictionary
  * @return candidate typ. zero if the candidate is not valid,
  *                           1 if the candidate is a black candidate (default candidate)
  *                           2 if the candidate is a white candidate
  */
-int MarkerDetector:: getMarkerId(cv::Mat candidateBits, int &idx, int &nrotations, const Params &params){
+int MarkerDetector:: getMarkerId(cv::Mat candidateBits, int &idx, int &nrotations, const DetectorParameters &params,int dictIndex){
     uint8_t typ=1;
 
     if(params.detectInvertedMarker ) candidateBits=~candidateBits;
     // analyze border bits
-    int maximumErrorsInBorder =int(params.dict.markerSize * params.dict.markerSize * params.maxErroneousBitsInBorderRate);
-    int borderErrors =getBorderErrors(candidateBits, params.dict.markerSize, params.markerBorderBits);
+    int maximumErrorsInBorder =int(params.dicts[dictIndex].markerSize * params.dicts[dictIndex].markerSize * params.maxErroneousBitsInBorderRate);
+    int borderErrors =getBorderErrors(candidateBits, params.dicts[dictIndex].markerSize, params.markerBorderBits);
     if(borderErrors > maximumErrorsInBorder) return 0; // border is wrong
     // take only inner bits
     cv::Mat onlyBits =candidateBits.rowRange(params.markerBorderBits,candidateBits.rows - params.markerBorderBits).colRange(params.markerBorderBits, candidateBits.cols - params.markerBorderBits);
     onlyBits/=255;
     // try to indentify the marker
-    if(!params.dict.identify(onlyBits, idx, nrotations, params.errorCorrectionRate))
+    if(!params.dicts[dictIndex].identify(onlyBits, idx, nrotations, params.errorCorrectionRate))
         return 0;
     return typ;
 }
@@ -488,7 +564,7 @@ void Marker::draw(cv::Mat &in, const cv::Scalar color) const{
  * This function scans a binary image (foreground as 255, background as 0) and
  * finds the external boundaries of all distinct objects.
  */
-std::vector<std::vector<cv::Point>> MarkerDetector::visitedAwareTracingContour(cv::Mat &padded,size_t minSize,int maxTimesRevisited ) {
+std::vector<std::vector<cv::Point>> MarkerDetector::visitedAwareTracingContour(cv::Mat &padded, size_t minSize, float maxRevisited ) {
     if (padded.empty() || padded.type() != CV_8UC1) return {};
     // 1. Fast Initialization and Padding
     int rows = padded.rows;
@@ -514,7 +590,8 @@ std::vector<std::vector<cv::Point>> MarkerDetector::visitedAwareTracingContour(c
     const uchar FOREGROUND = 255, BACKGROUND = 0,VISITED = 100;
     // 3. Scanning Loop
     // We iterate using raw pointers for maximum speed
-    for (int r = 1; r < rows - 1; ++r) {
+    int rowStep=1;//std::max(1,int(minSize/6));
+    for (int r = 1; r < rows - 1; r+=rowStep) {
         uchar* row_ptr = data + r * step;
         for (int c = 1; c < cols - 1;  ) {
             ////findStartContourPoint
@@ -537,7 +614,7 @@ std::vector<std::vector<cv::Point>> MarkerDetector::visitedAwareTracingContour(c
                 buffer.clear();
                 int curr_x = c, curr_y = r,search_idx = 1 ;
                 uchar* curr_ptr = row_ptr + c,*start_ptr=curr_ptr;
-                int ntimesRevisited=0;
+                size_t ntimesRevisited=0;
                 do {
                     buffer.emplace_back(curr_x, curr_y);// Add point
                     *curr_ptr = VISITED;// Mark as visited
@@ -558,7 +635,8 @@ std::vector<std::vector<cv::Point>> MarkerDetector::visitedAwareTracingContour(c
                         }
                     }
                 } while (curr_ptr != start_ptr );
-                if (ntimesRevisited<=maxTimesRevisited && buffer.size() >= minSize) {
+                size_t bufsize=buffer.size();
+                if (ntimesRevisited<= float(bufsize)*maxRevisited && bufsize >= minSize) {
                     contours.push_back(buffer);
                 }
             }
