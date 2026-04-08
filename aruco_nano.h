@@ -7,7 +7,7 @@
  *
  * DESCRIPTION:
  * ArucoNano compresses robust ArUco marker detection into a single header file
- *  that you can simply drop into your project. It is designed for
+ * that you can simply drop into your project. It is designed for
  * speed and ease of integration.
  *
  * KEY FEATURES:
@@ -372,6 +372,7 @@ std::vector<Marker>  MarkerDetector::detect(const cv::Mat &img, const DetectorPa
     //now, for each candidate check bits inside
     int dictIndex=-1;
     for(auto dict:params.dicts){
+        std::vector<Marker> currDirMarkerDetected;
         dictIndex++;
         cv::Mat bits(dict.markerSize+2,dict.markerSize+2,CV_8UC1),bitadaptive(dict.markerSize+2,dict.markerSize+2,CV_8UC1);
 
@@ -403,7 +404,7 @@ std::vector<Marker>  MarkerDetector::detect(const cv::Mat &img, const DetectorPa
             }
             if(marker.id!=-1) {
                 marker.dict=dictIndex;
-                DetectedMarkers.push_back(marker);
+                currDirMarkerDetected.push_back(marker);
                 //remove from candidate list
                 it=candidatesOut->erase(it);
             }
@@ -411,28 +412,26 @@ std::vector<Marker>  MarkerDetector::detect(const cv::Mat &img, const DetectorPa
         }
 
         /// REMOVAL OF INNER DUPLICATED DETECTIONS OF THE SAME MARKER(INNER AND OUTER BORDER)
-        std::sort(DetectedMarkers.begin(), DetectedMarkers.end(),[](const Marker &a,const Marker &b){return a.id<b.id;});
+        std::sort(currDirMarkerDetected.begin(), currDirMarkerDetected.end(),[](const Marker &a,const Marker &b){return a.id<b.id;});
         {
-            std::vector<bool> toRemove(DetectedMarkers.size(), false);
-            for (int i = 0; i < int(DetectedMarkers.size()) - 1; i++)
+            std::vector<bool> toRemove(currDirMarkerDetected.size(), false);
+            for (int i = 0; i < int(currDirMarkerDetected.size()) - 1; i++)
             {
-                for (int j = i + 1; j < int(DetectedMarkers.size()) && !toRemove[i]; j++)
+                for (int j = i + 1; j < int(currDirMarkerDetected.size()) && !toRemove[i]; j++)
                 {
-                    if (DetectedMarkers[i].id == DetectedMarkers[j].id )
+                    if (currDirMarkerDetected[i].id == currDirMarkerDetected[j].id )
                     {
-                        auto res=isInto(DetectedMarkers[i],DetectedMarkers[j]);
-                        //std::cout<<DetectedMarkers[i].id<<" "<<DetectedMarkers[j].id<< " res: "<<res<<std::endl;
+                        auto res=isInto(currDirMarkerDetected[i],currDirMarkerDetected[j]);
                         if( res==1)toRemove[i]=true;
                         else if( res==2)toRemove[j]=true;
 
                     }
                 }
             }
-            //now remove the marked ones
-            std::vector<Marker>  DetectedMarkers2;
-            for (unsigned int i = 0; i < DetectedMarkers.size(); i++)
-                if (!toRemove[i]) DetectedMarkers2.push_back(DetectedMarkers[i]);
-            DetectedMarkers=DetectedMarkers2;
+            //now move to DetectedMarkers these not marked for removal
+            for (unsigned int i = 0; i < currDirMarkerDetected.size(); i++)
+                if (!toRemove[i]) DetectedMarkers.push_back(currDirMarkerDetected[i]);
+
         }
     }
 
@@ -595,20 +594,22 @@ std::vector<std::vector<cv::Point>> MarkerDetector::visitedAwareTracingContour(c
         uchar* row_ptr = data + r * step;
         for (int c = 1; c < cols - 1;  ) {
             ////findStartContourPoint
-#if (CV_SIMD || CV_SIMD_SCALABLE)
-            cv::v_uint8 v_zero = cv::vx_setzero_u8();
-            for (; c <= cols - cv::VTraits<cv::v_uint8>::vlanes(); c+= cv::VTraits<cv::v_uint8>::vlanes())
             {
-                cv::v_uint8 vmask = (cv::v_ne(cv::vx_load((uchar*)(row_ptr + c)), v_zero));
-                if (v_check_any(vmask))
+#if (CV_SIMD || CV_SIMD_SCALABLE)
+                cv::v_uint8 v_zero = cv::vx_setzero_u8();
+                for (; c <= cols - cv::VTraits<cv::v_uint8>::vlanes(); c+= cv::VTraits<cv::v_uint8>::vlanes())
                 {
-                    c += v_scan_forward(vmask);
-                    break;
+                    cv::v_uint8 vmask = (cv::v_ne(cv::vx_load((uchar*)(row_ptr + c)), v_zero));
+                    if (v_check_any(vmask))
+                    {
+                        c += v_scan_forward(vmask);
+                        break;
+                    }
                 }
-            }
 #endif
-            //process last tail
-            for (; c < cols && !row_ptr[c]; ++c) ;//last tail
+                //process last tail
+                for (; c < cols && !row_ptr[c]; ++c) ;//last tail
+            }
             if( c==cols) break;//reached end of row
             if (row_ptr[c] == FOREGROUND ) {// --- 4. Tracing Loop  if is foreground
                 buffer.clear();
@@ -643,19 +644,21 @@ std::vector<std::vector<cv::Point>> MarkerDetector::visitedAwareTracingContour(c
             c++;//move to next pixel
             ////findEndContourPoint
             if ( row_ptr[c]){
+                {
 #if (CV_SIMD || CV_SIMD_SCALABLE)
 
-                cv::v_uint8 v_zero = cv::vx_setzero_u8();
-                for (; c <=  cols - cv::VTraits<cv::v_uint8>::vlanes(); c += cv::VTraits<cv::v_uint8>::vlanes())
-                {
-                    cv::v_uint8 vmask = (cv::v_eq(cv::vx_load((uchar*)(row_ptr + c)), v_zero));
-                    if (cv::v_check_any(vmask))
+                    cv::v_uint8 v_zero = cv::vx_setzero_u8();
+                    for (; c <=  cols - cv::VTraits<cv::v_uint8>::vlanes(); c += cv::VTraits<cv::v_uint8>::vlanes())
                     {
-                        c += cv::v_scan_forward(vmask);
-                        break;
+                        cv::v_uint8 vmask = (cv::v_eq(cv::vx_load((uchar*)(row_ptr + c)), v_zero));
+                        if (cv::v_check_any(vmask))
+                        {
+                            c += cv::v_scan_forward(vmask);
+                            break;
+                        }
                     }
-                }
 #endif
+                }
                 for (; c < cols && row_ptr[c]; ++c) ;//last tail
             }
         }
