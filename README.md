@@ -1,7 +1,13 @@
 # 📚 ArUco Nano
 
 A minimalist, header-only, high-performance C++ library for ArUco marker detection. [Paper](https://www.sciencedirect.com/science/article/pii/S2352711026001822)
-   
+
+
+For a fully functional new ArUco library including this work, please visit
+
+👉 **[https://github.com/rmsalinas/aruco2](https://github.com/rmsalinas/aruco2)**
+
+
 ## 🏛 Introduction
 
 ArUco Nano is a lightweight (single header) implementation of the ArUco marker detection algorithm. Designed for speed and ease of integration, it replaces general-purpose OpenCV algorithms with a specialized Visited-Aware Contour Tracing algorithm and direct sub-pixel code sampling.
