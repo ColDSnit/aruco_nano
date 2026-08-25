@@ -203,7 +203,15 @@ PYBIND11_MODULE(_aruco_nano, m) {
                  else if (K.rows == 9 && K.cols == 1) K = K.reshape(1, 3);
                  if (K.rows != 3 || K.cols != 3)
                      throw std::invalid_argument("camera_matrix must be 3x3 (or a flat 9-element vector)");
+                 if (marker_size <= 0.0)
+                     throw std::invalid_argument("marker_size must be positive");
                  cv::Mat D = numpy_to_mat_f64(dist_coeffs);
+                 // OpenCV accepts 4, 5, 8, 12 or 14 distortion coefficients,
+                 // and requires a single row or column vector.
+                 int ncoeff = (int)(D.rows * D.cols);
+                 bool is_vector = (D.rows == 1 || D.cols == 1);
+                 if (!is_vector || (ncoeff != 4 && ncoeff != 5 && ncoeff != 8 && ncoeff != 12 && ncoeff != 14))
+                     throw std::invalid_argument("dist_coeffs must be a 1D vector of 4, 5, 8, 12 or 14 elements");
                  auto pose = mk.estimatePose(K, D, marker_size);
                  return py::make_tuple(mat_to_numpy(pose.first), mat_to_numpy(pose.second));
              },
@@ -247,7 +255,17 @@ PYBIND11_MODULE(_aruco_nano, m) {
         .def_readwrite("min_size", &aruco_nano::DetectorParameters::minSize)
         .def_readwrite("max_attempts_per_candidate", &aruco_nano::DetectorParameters::maxAttemptsPerCandidate)
         .def_readwrite("max_times_revisited", &aruco_nano::DetectorParameters::maxTimesRevisited)
-        .def_readwrite("marker_border_bits", &aruco_nano::DetectorParameters::markerBorderBits)
+        .def_property("marker_border_bits",
+            [](const aruco_nano::DetectorParameters &p) { return p.markerBorderBits; },
+            [](aruco_nano::DetectorParameters &p, float v) {
+                // The vendored header indexes bits.ptr<uchar>(y)[k] with
+                // sizeWithBorders = markerSize + 2*borderSize; any value other
+                // than 1 reads out of bounds. All ArUco dictionaries use 1
+                // border bit, so reject anything else.
+                if (v != 1.0f)
+                    throw std::invalid_argument("marker_border_bits must be 1 (all ArUco dictionaries use 1 border bit)");
+                p.markerBorderBits = v;
+            })
         .def_readwrite("error_correction_rate", &aruco_nano::DetectorParameters::errorCorrectionRate)
         .def_readwrite("max_erroneous_bits_in_border_rate", &aruco_nano::DetectorParameters::maxErroneousBitsInBorderRate)
         .def_readwrite("detect_inverted_marker", &aruco_nano::DetectorParameters::detectInvertedMarker)

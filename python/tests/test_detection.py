@@ -184,6 +184,44 @@ def test_malformed_camera_matrix_rejected():
         pass
 
 
+def test_marker_border_bits_must_be_one():
+    p = aruco_nano.DetectorParameters()
+    for bad in [2, 1.5, 4, -1, 8, 3, 0]:
+        try:
+            p.marker_border_bits = bad
+            raise AssertionError("marker_border_bits should reject non-1 values")
+        except ValueError:
+            pass
+    p.marker_border_bits = 1  # valid
+
+
+def test_dist_coeffs_shape_validated():
+    dict_id = cv2.aruco.DICT_6X6_250
+    img = _make_marker(dict_id, 3)
+    m = aruco_nano.detect(img, dict_id=dict_id)[0]
+    K = np.array([[500, 0, 150], [0, 500, 150], [0, 0, 1]], dtype=np.float64)
+    for bad in [np.zeros((3, 3)), np.zeros((2, 2)), np.zeros(3), np.zeros(6)]:
+        try:
+            m.estimate_pose(K, bad, 0.05)
+            raise AssertionError("bad dist_coeffs should be rejected")
+        except ValueError:
+            pass
+    r, t = m.estimate_pose(K, np.zeros(5), 0.05)
+    assert r.shape == (3, 1)
+
+
+def test_marker_size_positive():
+    dict_id = cv2.aruco.DICT_6X6_250
+    img = _make_marker(dict_id, 3)
+    m = aruco_nano.detect(img, dict_id=dict_id)[0]
+    K = np.array([[500, 0, 150], [0, 500, 150], [0, 0, 1]], dtype=np.float64)
+    try:
+        m.estimate_pose(K, np.zeros(5), 0.0)
+        raise AssertionError("marker_size=0 should be rejected")
+    except ValueError:
+        pass
+
+
 def test_float_image_rejected():
     dict_id = cv2.aruco.DICT_6X6_250
     img = _make_marker(dict_id, 1)
@@ -221,6 +259,9 @@ if __name__ == "__main__":
     test_zero_dim_image_rejected()
     test_numpy_int_color_accepted()
     test_malformed_camera_matrix_rejected()
+    test_marker_border_bits_must_be_one()
+    test_dist_coeffs_shape_validated()
+    test_marker_size_positive()
     test_float_image_rejected()
     test_return_rejected()
     print("ALL TESTS PASSED")

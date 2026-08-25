@@ -30,4 +30,4 @@ cmake.args = ["-G", "Visual Studio 16 2019"]
 wheel.packages = ["aruco_nano"]
 # Keep the sdist clean: exclude build artifacts and the stale extension/DLL
 # that would otherwise be swept in from the working tree.
-sdist.exclude = ["build", "*.egg-info", "*.pyd", "*.dll", "*.pdb", "probe_*.py"]
+sdist.exclude = ["build", "*.egg-info", "*.pyd", "*.dll", "*.pdb", "*probe*.py"]
