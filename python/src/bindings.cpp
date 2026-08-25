@@ -15,6 +15,7 @@
 #include <cmath>
 #include <algorithm>
 #include <cstring>
+#include <stdexcept>
 
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
@@ -27,6 +28,10 @@ namespace py = pybind11;
 
 // Convert a uint8 NumPy array (HxW grayscale or HxWx3 BGR) into a cv::Mat.
 static cv::Mat numpy_to_mat_u8(const py::array_t<uint8_t, py::array::c_style | py::array::forcecast> &a) {
+    // Reject non-uint8 input explicitly: forcecast would otherwise silently
+    // truncate float images (e.g. a [0,1] normalised image becomes all-black).
+    if (a.dtype().kind() != 'u' || a.dtype().itemsize() != 1)
+        throw std::invalid_argument("image must be uint8 (HxW grayscale or HxWx3 BGR)");
     py::buffer_info info = a.request();
     if (info.ndim == 2) {
         cv::Mat m((int)info.shape[0], (int)info.shape[1], CV_8UC1, info.ptr);
@@ -112,7 +117,12 @@ static py::list corners_list_to_python(const std::vector<std::vector<cv::Point2f
 }
 
 // Build a single cv::aruco::Dictionary from a predefined-dictionary integer id.
+// OpenCV's getPredefinedDictionary has no default case, so an out-of-range id
+// silently falls through to DICT_4X4_50; reject it explicitly instead.
 static cv::aruco::Dictionary make_dict(int id) {
+    if (id < 0 || id > 21)
+        throw std::invalid_argument("invalid predefined dictionary id " + std::to_string(id) +
+                                    " (valid range 0..21, matching cv2.aruco.DICT_*)");
     return cv::aruco::getPredefinedDictionary(static_cast<cv::aruco::PredefinedDictionaryType>(id));
 }
 
@@ -121,6 +131,8 @@ static std::vector<cv::aruco::Dictionary> make_dicts(py::object o) {
     std::vector<cv::aruco::Dictionary> out;
     if (py::isinstance<py::int_>(o)) {
         out.push_back(make_dict(py::cast<int>(o)));
+    } else if (py::isinstance<py::str>(o)) {
+        throw std::runtime_error("dicts must be an int or a sequence of ints, not a string");
     } else if (py::isinstance<py::sequence>(o)) {
         for (auto item : o) out.push_back(make_dict(py::cast<int>(item)));
     } else {
@@ -148,6 +160,7 @@ PYBIND11_MODULE(_aruco_nano, m) {
                 const py::array_t<double, py::array::c_style | py::array::forcecast> &dist_coeffs,
                 double marker_size) {
                  cv::Mat K = numpy_to_mat_f64(camera_matrix);
+                 if (K.rows == 1 && K.cols == 9) K = K.reshape(1, 3);  // flat 9-vector -> 3x3
                  cv::Mat D = numpy_to_mat_f64(dist_coeffs);
                  auto pose = mk.estimatePose(K, D, marker_size);
                  return py::make_tuple(mat_to_numpy(pose.first), mat_to_numpy(pose.second));
@@ -158,11 +171,14 @@ PYBIND11_MODULE(_aruco_nano, m) {
              [](const aruco_nano::Marker &mk,
                 const py::array_t<uint8_t, py::array::c_style | py::array::forcecast> &image,
                 py::object color) {
-                 cv::Mat img = numpy_to_mat_u8(image).clone();
+                 cv::Mat img = numpy_to_mat_u8(image);  // already a clone
                  cv::Scalar c(0, 0, 255);
                  if (!color.is_none()) {
-                     auto t = py::cast<py::tuple>(color);
-                     if (t.size() == 3) c = cv::Scalar(py::cast<int>(t[0]), py::cast<int>(t[1]), py::cast<int>(t[2]));
+                     py::sequence t = py::cast<py::sequence>(color);
+                     if (py::len(t) == 3)
+                         c = cv::Scalar(py::cast<int>(t[0]), py::cast<int>(t[1]), py::cast<int>(t[2]));
+                     else if (py::len(t) == 4)
+                         c = cv::Scalar(py::cast<int>(t[0]), py::cast<int>(t[1]), py::cast<int>(t[2]), py::cast<int>(t[3]));
                  }
                  mk.draw(img, c);
                  return mat_to_numpy(img);
@@ -190,16 +206,22 @@ PYBIND11_MODULE(_aruco_nano, m) {
 
     // --- ArucoDetector (OpenCV-compatible wrapper) --------------------------
     py::class_<aruco_nano::ArucoDetector>(m, "ArucoDetector")
-        .def(py::init([](py::object dicts) {
-            return new aruco_nano::ArucoDetector(make_dicts(dicts));
-        }), py::arg("dicts"))
+        .def(py::init([](py::object dicts, py::object params) {
+            auto d = make_dicts(dicts);
+            if (params.is_none())
+                return new aruco_nano::ArucoDetector(d);
+            return new aruco_nano::ArucoDetector(d, py::cast<aruco_nano::DetectorParameters>(params));
+        }), py::arg("dicts"), py::arg("params") = py::none())
         .def("detect_markers",
              [](aruco_nano::ArucoDetector &self,
                 const py::array_t<uint8_t, py::array::c_style | py::array::forcecast> &image) {
                  cv::Mat img = numpy_to_mat_u8(image);
                  std::vector<std::vector<cv::Point2f>> corners;
                  std::vector<int> ids;
-                 self.detectMarkers(img, corners, ids);
+                 {
+                     py::gil_scoped_release release;  // detection is pure C++, no Python state
+                     self.detectMarkers(img, corners, ids);
+                 }
                  return py::make_tuple(corners_list_to_python(corners), ids_to_numpy(ids));
              },
              py::arg("image"),
@@ -211,7 +233,10 @@ PYBIND11_MODULE(_aruco_nano, m) {
                  cv::Mat img = numpy_to_mat_u8(image);
                  std::vector<std::vector<cv::Point2f>> corners;
                  std::vector<int> ids, dict_indices;
-                 self.detectMarkersMultiDict(img, corners, ids, cv::noArray(), dict_indices);
+                 {
+                     py::gil_scoped_release release;
+                     self.detectMarkersMultiDict(img, corners, ids, cv::noArray(), dict_indices);
+                 }
                  return py::make_tuple(corners_list_to_python(corners), ids_to_numpy(ids), ids_to_numpy(dict_indices));
              },
              py::arg("image"),
@@ -226,14 +251,19 @@ PYBIND11_MODULE(_aruco_nano, m) {
               aruco_nano::DetectorParameters p;
               if (!params.is_none())
                   p = py::cast<aruco_nano::DetectorParameters>(params);
+              if (!dict_id.is_none() && !dict_ids.is_none())
+                  throw std::runtime_error("pass either dict_id or dict_ids, not both");
               if (!dict_id.is_none())
                   p.dicts = make_dicts(dict_id);
               if (!dict_ids.is_none())
                   p.dicts = make_dicts(dict_ids);
 
               std::vector<aruco_nano::Marker> rejected;
-              std::vector<aruco_nano::Marker> markers =
-                  aruco_nano::MarkerDetector::detect(img, p, return_rejected ? &rejected : nullptr);
+              std::vector<aruco_nano::Marker> markers;
+              {
+                  py::gil_scoped_release release;
+                  markers = aruco_nano::MarkerDetector::detect(img, p, return_rejected ? &rejected : nullptr);
+              }
 
               py::list out;
               for (const auto &mk : markers) out.append(mk);

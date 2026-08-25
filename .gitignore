@@ -3,5 +3,9 @@ python/build/
 python/aruco_nano/*.pyd
 python/aruco_nano/*.dll
 python/aruco_nano/*.so
+python/*.egg-info/
+python/dist/
 __pycache__/
 *.pyc
+*.pdb
+.pytest_cache/

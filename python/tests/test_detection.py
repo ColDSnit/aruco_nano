@@ -2,7 +2,7 @@
 Purpose:  End-to-end tests for the aruco_nano Python wrapper. Generate real
            ArUco markers with OpenCV and verify the wrapper detects them.
 Status:   Active.
-Future:   Add multi-marker, inverted-marker, and multi-dictionary cases.
+Future:   Add inverted-marker and multi-marker cases.
 """
 import sys
 import os
@@ -54,6 +54,16 @@ def test_pose_estimation():
     assert tvec.shape == (3, 1)
 
 
+def test_pose_estimation_flat_camera_matrix():
+    dict_id = cv2.aruco.DICT_6X6_250
+    img = _make_marker(dict_id, 3)
+    markers = aruco_nano.detect(img, dict_id=dict_id)
+    K = np.array([500, 0, 150, 0, 500, 150, 0, 0, 1], dtype=np.float64)
+    D = np.zeros(5, dtype=np.float64)
+    rvec, tvec = markers[0].estimate_pose(K, D, 0.05)
+    assert rvec.shape == (3, 1)
+
+
 def test_detector_parameters():
     p = aruco_nano.DetectorParameters()
     assert p.min_size == 10
@@ -72,10 +82,68 @@ def test_multi_dict():
     assert int(dict_indices[0]) == 0
 
 
+def test_detect_markers_helper():
+    dict_id = cv2.aruco.DICT_6X6_250
+    img = _make_marker(dict_id, 5)
+    corners, ids = aruco_nano.detect_markers(img, dict_id=dict_id)
+    assert len(ids) == 1
+    assert int(ids[0]) == 5
+
+
+def test_detect_markers_helper_default_dict():
+    # Default dict is DICT_ARUCO_MIP_36h12 (id 21); a 6x6_250 marker must NOT match.
+    dict_id = cv2.aruco.DICT_6X6_250
+    img = _make_marker(dict_id, 5)
+    corners, ids = aruco_nano.detect_markers(img)
+    assert len(ids) == 0
+
+
+def test_detect_markers_helper_params():
+    # params tunes detection; dict_id selects the dictionary (and overrides
+    # any dicts carried by params, matching the C++ ArucoDetector semantics).
+    dict_id = cv2.aruco.DICT_6X6_250
+    img = _make_marker(dict_id, 5)
+    p = aruco_nano.DetectorParameters()
+    p.min_size = 5  # tune a real detection parameter
+    corners, ids = aruco_nano.detect_markers(img, dict_id=dict_id, params=p)
+    assert len(ids) == 1
+    assert int(ids[0]) == 5
+
+
+def test_draw_detected_markers():
+    dict_id = cv2.aruco.DICT_6X6_250
+    img = _make_marker(dict_id, 9)
+    corners, ids = aruco_nano.detect_markers(img, dict_id=dict_id)
+    out = aruco_nano.draw_detected_markers(img, corners, ids)
+    assert out.shape == img.shape
+    assert out.dtype == img.dtype
+
+
+def test_invalid_dict_id_raises():
+    import pytest
+    with pytest.raises(Exception):
+        aruco_nano.ArucoDetector(9999)
+
+
+def test_return_rejected():
+    dict_id = cv2.aruco.DICT_6X6_250
+    img = _make_marker(dict_id, 1)
+    markers, rejected = aruco_nano.detect(img, dict_id=dict_id, return_rejected=True)
+    assert len(markers) == 1
+    assert isinstance(rejected, list)
+
+
 if __name__ == "__main__":
     test_single_marker_detection()
     test_module_level_detect()
     test_pose_estimation()
+    test_pose_estimation_flat_camera_matrix()
     test_detector_parameters()
     test_multi_dict()
+    test_detect_markers_helper()
+    test_detect_markers_helper_default_dict()
+    test_detect_markers_helper_params()
+    test_draw_detected_markers()
+    test_invalid_dict_id_raises()
+    test_return_rejected()
     print("ALL TESTS PASSED")
