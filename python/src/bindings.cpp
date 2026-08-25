@@ -239,7 +239,12 @@ PYBIND11_MODULE(_aruco_nano, m) {
                      auto pose = mk.estimatePose(K, D, marker_size);
                      return py::make_tuple(mat_to_numpy(pose.first), mat_to_numpy(pose.second));
                  } catch (const cv::Exception &e) {
-                     throw std::invalid_argument(std::string("pose estimation failed (degenerate camera/marker geometry): ") + e.what());
+                     // e.what() embeds the OpenCV build-machine path; keep only
+                     // the assertion code (the text after the last "error:").
+                     std::string msg = e.what();
+                     size_t pos = msg.rfind("error:");
+                     std::string code = (pos == std::string::npos) ? msg : msg.substr(pos);
+                     throw std::invalid_argument("pose estimation failed (degenerate camera/marker geometry) — " + code);
                  }
              },
              py::arg("camera_matrix"), py::arg("dist_coeffs"), py::arg("marker_size") = 1.0,
