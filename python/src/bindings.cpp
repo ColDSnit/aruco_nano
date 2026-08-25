@@ -166,8 +166,11 @@ PYBIND11_MODULE(_aruco_nano, m) {
                 const py::array_t<double, py::array::c_style> &dist_coeffs,
                 double marker_size) {
                  cv::Mat K = numpy_to_mat_f64(camera_matrix);
-                 if (K.rows == 1 && K.cols == 9) K = K.reshape(1, 3);      // flat row 9-vector -> 3x3
-                 else if (K.rows == 9 && K.cols == 1) K = K.reshape(3, 1);   // flat column 9-vector -> 3x3
+                 // Accept a flat 9-element camera matrix (row or column) and
+                 // reshape to 3x3 single-channel. reshape(1, 3) = 1 channel,
+                 // 3 rows -> 3x3.
+                 if (K.rows == 1 && K.cols == 9) K = K.reshape(1, 3);
+                 else if (K.rows == 9 && K.cols == 1) K = K.reshape(1, 3);
                  cv::Mat D = numpy_to_mat_f64(dist_coeffs);
                  auto pose = mk.estimatePose(K, D, marker_size);
                  return py::make_tuple(mat_to_numpy(pose.first), mat_to_numpy(pose.second));

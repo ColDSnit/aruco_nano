@@ -62,6 +62,9 @@ def test_pose_estimation_flat_camera_matrix():
     D = np.zeros(5, dtype=np.float64)
     rvec, tvec = markers[0].estimate_pose(K, D, 0.05)
     assert rvec.shape == (3, 1)
+    # column 9-vector must also reshape correctly
+    rvec2, tvec2 = markers[0].estimate_pose(K.reshape(9, 1), D, 0.05)
+    assert rvec2.shape == (3, 1)
 
 
 def test_detector_parameters():
