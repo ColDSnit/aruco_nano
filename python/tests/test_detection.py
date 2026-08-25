@@ -248,6 +248,41 @@ def test_marker_size_positive():
         pass
 
 
+def test_tiny_marker_size_clean_error():
+    dict_id = cv2.aruco.DICT_6X6_250
+    img = _make_marker(dict_id, 3)
+    m = aruco_nano.detect(img, dict_id=dict_id)[0]
+    K = np.array([[500, 0, 150], [0, 500, 150], [0, 0, 1]], dtype=np.float64)
+    for ms in [1e-6, 5e-5, 1e-4]:
+        try:
+            m.estimate_pose(K, np.zeros(5), ms)
+            raise AssertionError("tiny marker_size should raise")
+        except ValueError:
+            pass
+
+
+def test_box_filter_size_validated():
+    p = aruco_nano.DetectorParameters()
+    for bad in [0, -3, 2, 4]:
+        try:
+            p.box_filter_size = bad
+            raise AssertionError("bad box_filter_size should be rejected")
+        except ValueError:
+            pass
+    p.box_filter_size = 15
+
+
+def test_draw_length_mismatch():
+    dict_id = cv2.aruco.DICT_6X6_250
+    img = _make_marker(dict_id, 3)
+    corners, ids = aruco_nano.detect_markers(img, dict_id=dict_id)
+    try:
+        aruco_nano.draw_detected_markers(img, corners[:0], ids)
+        raise AssertionError("mismatched corners/ids should raise")
+    except ValueError:
+        pass
+
+
 def test_float_image_rejected():
     dict_id = cv2.aruco.DICT_6X6_250
     img = _make_marker(dict_id, 1)
@@ -290,6 +325,9 @@ if __name__ == "__main__":
     test_marker_size_positive()
     test_marker_size_finite_and_positive()
     test_degenerate_camera_matrix_rejected()
+    test_tiny_marker_size_clean_error()
+    test_box_filter_size_validated()
+    test_draw_length_mismatch()
     test_float_image_rejected()
     test_return_rejected()
     print("ALL TESTS PASSED")

@@ -222,10 +222,6 @@ PYBIND11_MODULE(_aruco_nano, m) {
                      throw std::invalid_argument("camera_matrix focal lengths must be positive");
                  if (!std::isfinite(marker_size) || marker_size <= 0.0)
                      throw std::invalid_argument("marker_size must be a positive finite number");
-                 // OpenCV's sqpnp solver requires the marker scale (marker_size/2)
-                 // to be >= 1e-7; reject absurdly small sizes below 1e-6 m (1 um).
-                 if (marker_size < 1e-6)
-                     throw std::invalid_argument("marker_size is too small (must be >= 1e-6 m)");
                  cv::Mat D = numpy_to_mat_f64(dist_coeffs);
                  // OpenCV accepts 4, 5, 8, 12 or 14 distortion coefficients,
                  // and requires a single row or column vector.
@@ -235,8 +231,16 @@ PYBIND11_MODULE(_aruco_nano, m) {
                      throw std::invalid_argument("dist_coeffs must be a 1D vector of 4, 5, 8, 12 or 14 elements");
                  if (!mat_is_finite(D))
                      throw std::invalid_argument("dist_coeffs must contain only finite values");
-                 auto pose = mk.estimatePose(K, D, marker_size);
-                 return py::make_tuple(mat_to_numpy(pose.first), mat_to_numpy(pose.second));
+                 // The sqpnp solver's internal thresholds depend on marker_size
+                 // AND the camera matrix (no fixed floor is correct), so catch
+                 // its assertion and translate it to a clean ValueError instead
+                 // of leaking the raw OpenCV error with build paths.
+                 try {
+                     auto pose = mk.estimatePose(K, D, marker_size);
+                     return py::make_tuple(mat_to_numpy(pose.first), mat_to_numpy(pose.second));
+                 } catch (const cv::Exception &e) {
+                     throw std::invalid_argument(std::string("pose estimation failed (degenerate camera/marker geometry): ") + e.what());
+                 }
              },
              py::arg("camera_matrix"), py::arg("dist_coeffs"), py::arg("marker_size") = 1.0,
              "Estimate marker pose; returns (rvec, tvec) as float64 NumPy arrays.")
@@ -273,7 +277,14 @@ PYBIND11_MODULE(_aruco_nano, m) {
     // --- DetectorParameters -------------------------------------------------
     py::class_<aruco_nano::DetectorParameters>(m, "DetectorParameters")
         .def(py::init<>())
-        .def_readwrite("box_filter_size", &aruco_nano::DetectorParameters::boxFilterSize)
+        .def_property("box_filter_size",
+            [](const aruco_nano::DetectorParameters &p) { return p.boxFilterSize; },
+            [](aruco_nano::DetectorParameters &p, int v) {
+                // cv::boxFilter asserts on non-positive or even kernel sizes.
+                if (v < 1 || v % 2 == 0)
+                    throw std::invalid_argument("box_filter_size must be a positive odd integer");
+                p.boxFilterSize = v;
+            })
         .def_readwrite("thres", &aruco_nano::DetectorParameters::thres)
         .def_readwrite("min_size", &aruco_nano::DetectorParameters::minSize)
         .def_readwrite("max_attempts_per_candidate", &aruco_nano::DetectorParameters::maxAttemptsPerCandidate)

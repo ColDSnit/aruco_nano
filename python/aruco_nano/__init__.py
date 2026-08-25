@@ -52,6 +52,11 @@ def draw_detected_markers(image, corners, ids, border_color=(0, 255, 0)):
 
     out = image.copy()
     if ids is not None and len(ids) > 0:
+        if len(corners) != len(ids):
+            raise ValueError(
+                f"corners and ids must have the same length "
+                f"(got {len(corners)} corners, {len(ids)} ids)"
+            )
         # cv2.aruco.drawDetectedMarkers requires (1, 4, 2) per marker.
         reshaped = [np.asarray(c, dtype=np.float32).reshape(1, 4, 2) for c in corners]
         cv2.aruco.drawDetectedMarkers(out, reshaped, ids, border_color)
