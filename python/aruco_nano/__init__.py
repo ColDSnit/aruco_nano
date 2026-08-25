@@ -15,9 +15,6 @@ from ._aruco_nano import (  # noqa: F401
     detect,
 )
 
-# The library's native default dictionary (aruco_nano.h DetectorParameters).
-DEFAULT_DICT_ID = 21  # cv2.aruco.DICT_ARUCO_MIP_36h12
-
 __all__ = [
     "ArucoNanoVersion",
     "ArucoDetector",
@@ -27,7 +24,6 @@ __all__ = [
     "detect",
     "detect_markers",
     "draw_detected_markers",
-    "DEFAULT_DICT_ID",
 ]
 
 

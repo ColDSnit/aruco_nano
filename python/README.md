@@ -67,13 +67,14 @@ out = aruco_nano.draw_detected_markers(image, corners, ids)
 ## API
 
 - `aruco_nano.detect(image, params=None, dict_id=None, dict_ids=None, return_rejected=False)`
-- `aruco_nano.detect_markers(image, dict_id=None, params=None)` — defaults to `DICT_ARUCO_MIP_36h12`
+- `aruco_nano.detect_markers(image, dict_id=None, params=None)` — dictionary from `dict_id`, else `params.dicts`, else `DICT_ARUCO_MIP_36h12`
 - `aruco_nano.draw_detected_markers(image, corners, ids, border_color=(0,255,0))`
-- `aruco_nano.ArucoDetector(dicts, params=None)` — `.detect_markers(image)`, `.detect_markers_multi_dict(image)`
+- `aruco_nano.ArucoDetector(dicts=None, params=None)` — `.detect_markers(image)`, `.detect_markers_multi_dict(image)`
 - `aruco_nano.DetectorParameters` — mirrors the C++ `DetectorParameters` struct
 - `aruco_nano.Marker` — `.id`, `.dict` (dict index), `.corners`, `.estimate_pose(...)`, `.draw(...)`
 
 ## License
 
-MIT. The vendored `aruco_nano.h` is Copyright (c) 2026 University of Cordoba,
-MIT licensed. See `LICENSE`.
+MIT. The vendored `aruco_nano.h` is Copyright (c) 2026 Rafael Muñoz-Salinas /
+University of Cordoba (the upstream LICENSE and header disagree on the exact
+holder), MIT licensed. See `LICENSE`.

@@ -31,6 +31,8 @@ static cv::Mat numpy_to_mat_u8(const py::array_t<uint8_t, py::array::c_style> &a
     // The binding declares uint8 without forcecast, so pybind11 rejects
     // non-uint8 at the boundary (TypeError) before this body runs.
     py::buffer_info info = a.request();
+    if (info.shape[0] == 0 || info.shape[1] == 0)
+        throw std::invalid_argument("image must be non-empty (HxW or HxWx3)");
     if (info.ndim == 2) {
         cv::Mat m((int)info.shape[0], (int)info.shape[1], CV_8UC1, info.ptr);
         return m.clone();
@@ -130,6 +132,10 @@ static std::vector<cv::aruco::Dictionary> make_dicts(py::object o) {
     if (py::isinstance<py::str>(o) || py::isinstance<py::bytes>(o)) {
         throw std::runtime_error("dicts must be an int or a sequence of ints, not a string/bytes");
     }
+    // Reject bool explicitly: it is an int subclass, so py::cast<int> would
+    // silently select dict 1 (DICT_4X4_50) for ArucoDetector(True).
+    if (py::isinstance<py::bool_>(o))
+        throw std::runtime_error("dicts must be an int or a sequence of ints, not a bool");
     // Try a scalar int first: py::cast<int> handles Python ints AND numpy
     // integer scalars (via __index__), which py::isinstance<py::int_> misses.
     try {
@@ -185,12 +191,16 @@ PYBIND11_MODULE(_aruco_nano, m) {
                  cv::Scalar c(0, 0, 255);
                  if (!color.is_none()) {
                      py::sequence t = py::cast<py::sequence>(color);
+                     if (py::len(t) != 3 && py::len(t) != 4)
+                         throw std::invalid_argument("color must be a 3- or 4-element sequence");
+                     for (py::ssize_t i = 0; i < py::len(t); ++i) {
+                         if (!py::isinstance<py::int_>(t[i]))
+                             throw std::invalid_argument("color components must be integers");
+                     }
                      if (py::len(t) == 3)
                          c = cv::Scalar(py::cast<int>(t[0]), py::cast<int>(t[1]), py::cast<int>(t[2]));
-                     else if (py::len(t) == 4)
-                         c = cv::Scalar(py::cast<int>(t[0]), py::cast<int>(t[1]), py::cast<int>(t[2]), py::cast<int>(t[3]));
                      else
-                         throw std::invalid_argument("color must be a 3- or 4-element sequence");
+                         c = cv::Scalar(py::cast<int>(t[0]), py::cast<int>(t[1]), py::cast<int>(t[2]), py::cast<int>(t[3]));
                  }
                  mk.draw(img, c);
                  return mat_to_numpy(img);

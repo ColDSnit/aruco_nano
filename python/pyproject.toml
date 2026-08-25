@@ -7,8 +7,9 @@ name = "aruco-nano"
 version = "0.1.0"
 description = "Python wrapper for ArUco Nano, a header-only ArUco marker detector"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "ColDSnit" }]
 dependencies = ["numpy"]
 
@@ -23,9 +24,10 @@ Upstream = "https://github.com/rmsalinas/aruco_nano"
 cmake.build-type = "Release"
 # The official OpenCV 4.11.0 Windows prebuilt is vc16 (MSVC 2019). Force the
 # matching generator so OpenCVConfig.cmake resolves the vc16 runtime; the
-# newest MSVC (VS 18) maps to a runtime the prebuilt does not ship.
+# newest MSVC (VS 18) maps to a runtime the prebuilt does not ship. This is a
+# Windows-only package (the extension links opencv_world4110.dll).
 cmake.args = ["-G", "Visual Studio 16 2019"]
 wheel.packages = ["aruco_nano"]
 # Keep the sdist clean: exclude build artifacts and the stale extension/DLL
 # that would otherwise be swept in from the working tree.
-sdist.exclude = ["build", "*.egg-info", "*.pyd", "*.dll", "*.pdb"]
+sdist.exclude = ["build", "*.egg-info", "*.pyd", "*.dll", "*.pdb", "probe_*.py"]

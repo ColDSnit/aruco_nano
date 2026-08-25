@@ -128,6 +128,22 @@ def test_invalid_dict_id_raises():
         aruco_nano.ArucoDetector(9999)
 
 
+def test_bool_dict_id_rejected():
+    try:
+        aruco_nano.ArucoDetector(True)
+        raise AssertionError("bool dict id should have been rejected")
+    except RuntimeError:
+        pass
+
+
+def test_empty_image_rejected():
+    try:
+        aruco_nano.ArucoDetector(10).detect_markers(np.zeros((0, 0), dtype=np.uint8))
+        raise AssertionError("empty image should have been rejected")
+    except ValueError:
+        pass
+
+
 def test_float_image_rejected():
     dict_id = cv2.aruco.DICT_6X6_250
     img = _make_marker(dict_id, 1)
@@ -159,6 +175,8 @@ if __name__ == "__main__":
     test_detect_markers_helper_params()
     test_draw_detected_markers()
     test_invalid_dict_id_raises()
+    test_bool_dict_id_rejected()
+    test_empty_image_rejected()
     test_float_image_rejected()
     test_return_rejected()
     print("ALL TESTS PASSED")
