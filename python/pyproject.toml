@@ -12,6 +12,9 @@ license = "MIT"
 authors = [{ name = "ColDSnit" }]
 dependencies = ["numpy"]
 
+[project.optional-dependencies]
+draw = ["opencv-python>=4.9"]
+
 [project.urls]
 Homepage = "https://github.com/ColDSnit/aruco_nano"
 Upstream = "https://github.com/rmsalinas/aruco_nano"
@@ -23,3 +26,6 @@ cmake.build-type = "Release"
 # newest MSVC (VS 18) maps to a runtime the prebuilt does not ship.
 cmake.args = ["-G", "Visual Studio 16 2019"]
 wheel.packages = ["aruco_nano"]
+# Keep the sdist clean: exclude build artifacts and the stale extension/DLL
+# that would otherwise be swept in from the working tree.
+sdist.exclude = ["build", "*.egg-info", "*.pyd", "*.dll", "*.pdb"]

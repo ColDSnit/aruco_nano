@@ -18,9 +18,11 @@ The extension links against the official OpenCV 4.11.0 Windows prebuilt
 
 ```bash
 # Requires: the OpenCV 4.11.0 prebuilt extracted somewhere, and a Python with
-# dev headers (the calibration conda env has them).
+# dev headers (the calibration conda env has them). Use cmake.define.* (NOT
+# cmake.args) so the generator pin in pyproject.toml is preserved.
 pip install . \
-  --config-settings=cmake.args="-DOpenCV_DIR=<path>/opencv/build;-DPython_EXECUTABLE=<calibration-env>/python.exe"
+  --config-settings=cmake.define.OpenCV_DIR="<path>/opencv/build" \
+  --config-settings=cmake.define.Python_EXECUTABLE="<calibration-env>/python.exe"
 ```
 
 The wheel bundles `_aruco_nano.cp311-win_amd64.pyd` and `opencv_world4110.dll`

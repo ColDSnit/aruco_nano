@@ -19,8 +19,9 @@ find_package(Python COMPONENTS Interpreter Development REQUIRED)
 
 pybind11_add_module(_aruco_nano src/bindings.cpp)
 
-# The vendored aruco_nano.h lives one directory up (the repo root).
-target_include_directories(_aruco_nano PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+# The vendored aruco_nano.h is copied into this directory so the package is
+# self-contained (the sdist must build without the repo root).
+target_include_directories(_aruco_nano PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(_aruco_nano PRIVATE ${OpenCV_LIBS})
 
 # On Windows, ensure the OpenCV DLLs are discoverable at import time by

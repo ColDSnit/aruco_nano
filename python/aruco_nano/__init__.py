@@ -35,13 +35,12 @@ def detect_markers(image, dict_id=None, params=None):
     """Detect markers and return OpenCV-style ``(corners, ids)``.
 
     ``corners`` is a list of ``(4, 2)`` float32 arrays; ``ids`` is an int32
-    array. ``dict_id`` is a predefined dictionary id (e.g. ``cv2.aruco.DICT_6X6_250``);
-    it defaults to ``DICT_ARUCO_MIP_36h12`` (the library's native default).
-    ``params`` is an optional ``DetectorParameters``.
+    array. ``dict_id`` is a predefined dictionary id (e.g. ``cv2.aruco.DICT_6X6_250``).
+    When ``dict_id`` is omitted, the dictionary is taken from ``params.dicts``
+    if ``params`` is given, else the library's native default
+    ``DICT_ARUCO_MIP_36h12``. ``params`` is an optional ``DetectorParameters``.
     """
-    detector = ArucoDetector(
-        DEFAULT_DICT_ID if dict_id is None else dict_id, params=params
-    )
+    detector = ArucoDetector(dict_id, params=params)
     return detector.detect_markers(image)
 
 

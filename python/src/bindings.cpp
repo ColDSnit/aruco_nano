@@ -28,10 +28,8 @@ namespace py = pybind11;
 
 // Convert a uint8 NumPy array (HxW grayscale or HxWx3 BGR) into a cv::Mat.
 static cv::Mat numpy_to_mat_u8(const py::array_t<uint8_t, py::array::c_style> &a) {
-    // Defensive: the binding declares uint8 without forcecast, so pybind11
-    // already rejects non-uint8 at the boundary; this guards the c_style path.
-    if (a.dtype().kind() != 'u' || a.dtype().itemsize() != 1)
-        throw std::invalid_argument("image must be uint8 (HxW grayscale or HxWx3 BGR)");
+    // The binding declares uint8 without forcecast, so pybind11 rejects
+    // non-uint8 at the boundary (TypeError) before this body runs.
     py::buffer_info info = a.request();
     if (info.ndim == 2) {
         cv::Mat m((int)info.shape[0], (int)info.shape[1], CV_8UC1, info.ptr);
@@ -129,16 +127,24 @@ static cv::aruco::Dictionary make_dict(int id) {
 // Build a vector of dictionaries from an int or a sequence of ints.
 static std::vector<cv::aruco::Dictionary> make_dicts(py::object o) {
     std::vector<cv::aruco::Dictionary> out;
-    if (py::isinstance<py::int_>(o)) {
-        out.push_back(make_dict(py::cast<int>(o)));
-    } else if (py::isinstance<py::str>(o)) {
-        throw std::runtime_error("dicts must be an int or a sequence of ints, not a string");
-    } else if (py::isinstance<py::sequence>(o)) {
-        for (auto item : o) out.push_back(make_dict(py::cast<int>(item)));
-    } else {
-        throw std::runtime_error("dicts must be an int (predefined dictionary id) or a sequence of ints");
+    if (py::isinstance<py::str>(o) || py::isinstance<py::bytes>(o)) {
+        throw std::runtime_error("dicts must be an int or a sequence of ints, not a string/bytes");
     }
-    return out;
+    // Try a scalar int first: py::cast<int> handles Python ints AND numpy
+    // integer scalars (via __index__), which py::isinstance<py::int_> misses.
+    try {
+        out.push_back(make_dict(py::cast<int>(o)));
+        return out;
+    } catch (const py::cast_error &) {
+        // not a scalar int; fall through to sequence handling
+    }
+    if (py::isinstance<py::sequence>(o)) {
+        for (auto item : o) out.push_back(make_dict(py::cast<int>(item)));
+        if (out.empty())
+            throw std::runtime_error("dicts must not be empty");
+        return out;
+    }
+    throw std::runtime_error("dicts must be an int (predefined dictionary id) or a sequence of ints");
 }
 
 PYBIND11_MODULE(_aruco_nano, m) {
@@ -160,7 +166,8 @@ PYBIND11_MODULE(_aruco_nano, m) {
                 const py::array_t<double, py::array::c_style> &dist_coeffs,
                 double marker_size) {
                  cv::Mat K = numpy_to_mat_f64(camera_matrix);
-                 if (K.rows == 1 && K.cols == 9) K = K.reshape(1, 3);  // flat 9-vector -> 3x3
+                 if (K.rows == 1 && K.cols == 9) K = K.reshape(1, 3);      // flat row 9-vector -> 3x3
+                 else if (K.rows == 9 && K.cols == 1) K = K.reshape(3, 1);   // flat column 9-vector -> 3x3
                  cv::Mat D = numpy_to_mat_f64(dist_coeffs);
                  auto pose = mk.estimatePose(K, D, marker_size);
                  return py::make_tuple(mat_to_numpy(pose.first), mat_to_numpy(pose.second));
@@ -179,6 +186,8 @@ PYBIND11_MODULE(_aruco_nano, m) {
                          c = cv::Scalar(py::cast<int>(t[0]), py::cast<int>(t[1]), py::cast<int>(t[2]));
                      else if (py::len(t) == 4)
                          c = cv::Scalar(py::cast<int>(t[0]), py::cast<int>(t[1]), py::cast<int>(t[2]), py::cast<int>(t[3]));
+                     else
+                         throw std::invalid_argument("color must be a 3- or 4-element sequence");
                  }
                  mk.draw(img, c);
                  return mat_to_numpy(img);
@@ -207,11 +216,17 @@ PYBIND11_MODULE(_aruco_nano, m) {
     // --- ArucoDetector (OpenCV-compatible wrapper) --------------------------
     py::class_<aruco_nano::ArucoDetector>(m, "ArucoDetector")
         .def(py::init([](py::object dicts, py::object params) {
-            auto d = make_dicts(dicts);
-            if (params.is_none())
-                return new aruco_nano::ArucoDetector(d);
-            return new aruco_nano::ArucoDetector(d, py::cast<aruco_nano::DetectorParameters>(params));
-        }), py::arg("dicts"), py::arg("params") = py::none())
+            aruco_nano::DetectorParameters p;
+            if (!params.is_none())
+                p = py::cast<aruco_nano::DetectorParameters>(params);
+            if (!dicts.is_none())
+                p.dicts = make_dicts(dicts);
+            // dicts is None -> keep p.dicts (params' dicts, or the C++ default
+            // DICT_ARUCO_MIP_36h12 when params is also None). This makes the
+            // helper's dict_id=None path honour params.dicts instead of
+            // silently clobbering it with the default.
+            return new aruco_nano::ArucoDetector(p.dicts, p);
+        }), py::arg("dicts") = py::none(), py::arg("params") = py::none())
         .def("detect_markers",
              [](aruco_nano::ArucoDetector &self,
                 const py::array_t<uint8_t, py::array::c_style> &image) {
