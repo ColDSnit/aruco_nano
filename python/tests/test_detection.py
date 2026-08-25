@@ -144,6 +144,46 @@ def test_empty_image_rejected():
         pass
 
 
+def test_zero_dim_image_rejected():
+    # 0-d and 1-d arrays must raise cleanly, not segfault (round-4 P0 regression)
+    for arr in [np.array(5, np.uint8), np.zeros(5, np.uint8)]:
+        try:
+            aruco_nano.detect(arr)
+            raise AssertionError("0-d/1-d image should have been rejected")
+        except ValueError:
+            pass
+
+
+def test_numpy_bool_dict_id_rejected():
+    for v in [np.bool_(True), np.bool_(False), [True]]:
+        try:
+            aruco_nano.ArucoDetector(v)
+            raise AssertionError("bool dict id should have been rejected")
+        except RuntimeError:
+            pass
+
+
+def test_numpy_int_color_accepted():
+    dict_id = cv2.aruco.DICT_6X6_250
+    img = _make_marker(dict_id, 3)
+    m = aruco_nano.detect(img, dict_id=dict_id)[0]
+    out = m.draw(img, (np.int64(0), np.int64(255), np.int64(0)))
+    assert out.shape == img.shape
+
+
+def test_malformed_camera_matrix_rejected():
+    dict_id = cv2.aruco.DICT_6X6_250
+    img = _make_marker(dict_id, 3)
+    m = aruco_nano.detect(img, dict_id=dict_id)[0]
+    K = np.array([[500, 0], [0, 500]], dtype=np.float64)
+    D = np.zeros(5, dtype=np.float64)
+    try:
+        m.estimate_pose(K, D, 0.05)
+        raise AssertionError("malformed camera matrix should have been rejected")
+    except ValueError:
+        pass
+
+
 def test_float_image_rejected():
     dict_id = cv2.aruco.DICT_6X6_250
     img = _make_marker(dict_id, 1)
@@ -176,7 +216,11 @@ if __name__ == "__main__":
     test_draw_detected_markers()
     test_invalid_dict_id_raises()
     test_bool_dict_id_rejected()
+    test_numpy_bool_dict_id_rejected()
     test_empty_image_rejected()
+    test_zero_dim_image_rejected()
+    test_numpy_int_color_accepted()
+    test_malformed_camera_matrix_rejected()
     test_float_image_rejected()
     test_return_rejected()
     print("ALL TESTS PASSED")

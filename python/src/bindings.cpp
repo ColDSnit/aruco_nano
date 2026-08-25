@@ -31,6 +31,10 @@ static cv::Mat numpy_to_mat_u8(const py::array_t<uint8_t, py::array::c_style> &a
     // The binding declares uint8 without forcecast, so pybind11 rejects
     // non-uint8 at the boundary (TypeError) before this body runs.
     py::buffer_info info = a.request();
+    // Check ndim BEFORE touching info.shape: a 0-d or 1-d array has a shorter
+    // shape vector, and indexing it out of bounds is undefined behaviour.
+    if (info.ndim < 2)
+        throw std::invalid_argument("image must be HxW (grayscale) or HxWx3 (BGR) uint8");
     if (info.shape[0] == 0 || info.shape[1] == 0)
         throw std::invalid_argument("image must be non-empty (HxW or HxWx3)");
     if (info.ndim == 2) {
@@ -126,15 +130,31 @@ static cv::aruco::Dictionary make_dict(int id) {
     return cv::aruco::getPredefinedDictionary(static_cast<cv::aruco::PredefinedDictionaryType>(id));
 }
 
+// Detect Python bool AND numpy bool scalars/arrays. Python bool is an int
+// subclass; numpy bool_ has __int__ but not __index__, so py::cast<int>
+// would silently coerce both to 0/1. numpy bools expose a dtype with kind 'b'.
+static bool is_bool_like(py::handle o) {
+    if (py::isinstance<py::bool_>(o)) return true;  // Python bool
+    if (py::hasattr(o, "dtype")) {
+        py::object dt = o.attr("dtype");
+        if (py::hasattr(dt, "kind")) {
+            py::object kind = dt.attr("kind");
+            if (py::isinstance<py::str>(kind) && py::cast<std::string>(kind) == "b")
+                return true;  // numpy bool scalar or array
+        }
+    }
+    return false;
+}
+
 // Build a vector of dictionaries from an int or a sequence of ints.
 static std::vector<cv::aruco::Dictionary> make_dicts(py::object o) {
     std::vector<cv::aruco::Dictionary> out;
     if (py::isinstance<py::str>(o) || py::isinstance<py::bytes>(o)) {
         throw std::runtime_error("dicts must be an int or a sequence of ints, not a string/bytes");
     }
-    // Reject bool explicitly: it is an int subclass, so py::cast<int> would
-    // silently select dict 1 (DICT_4X4_50) for ArucoDetector(True).
-    if (py::isinstance<py::bool_>(o))
+    // Reject bool (Python and numpy): py::cast<int> would silently coerce it
+    // to 0/1 and select the wrong dictionary.
+    if (is_bool_like(o))
         throw std::runtime_error("dicts must be an int or a sequence of ints, not a bool");
     // Try a scalar int first: py::cast<int> handles Python ints AND numpy
     // integer scalars (via __index__), which py::isinstance<py::int_> misses.
@@ -145,7 +165,11 @@ static std::vector<cv::aruco::Dictionary> make_dicts(py::object o) {
         // not a scalar int; fall through to sequence handling
     }
     if (py::isinstance<py::sequence>(o)) {
-        for (auto item : o) out.push_back(make_dict(py::cast<int>(item)));
+        for (auto item : o) {
+            if (is_bool_like(item))
+                throw std::runtime_error("dicts must be an int or a sequence of ints, not a bool");
+            out.push_back(make_dict(py::cast<int>(item)));
+        }
         if (out.empty())
             throw std::runtime_error("dicts must not be empty");
         return out;
@@ -177,6 +201,8 @@ PYBIND11_MODULE(_aruco_nano, m) {
                  // 3 rows -> 3x3.
                  if (K.rows == 1 && K.cols == 9) K = K.reshape(1, 3);
                  else if (K.rows == 9 && K.cols == 1) K = K.reshape(1, 3);
+                 if (K.rows != 3 || K.cols != 3)
+                     throw std::invalid_argument("camera_matrix must be 3x3 (or a flat 9-element vector)");
                  cv::Mat D = numpy_to_mat_f64(dist_coeffs);
                  auto pose = mk.estimatePose(K, D, marker_size);
                  return py::make_tuple(mat_to_numpy(pose.first), mat_to_numpy(pose.second));
@@ -194,8 +220,13 @@ PYBIND11_MODULE(_aruco_nano, m) {
                      if (py::len(t) != 3 && py::len(t) != 4)
                          throw std::invalid_argument("color must be a 3- or 4-element sequence");
                      for (py::ssize_t i = 0; i < py::len(t); ++i) {
-                         if (!py::isinstance<py::int_>(t[i]))
+                         if (is_bool_like(t[i]))
+                             throw std::invalid_argument("color components must be integers, not bools");
+                         try {
+                             (void)py::cast<int>(t[i]);  // accepts Python ints AND numpy ints
+                         } catch (const py::cast_error &) {
                              throw std::invalid_argument("color components must be integers");
+                         }
                      }
                      if (py::len(t) == 3)
                          c = cv::Scalar(py::cast<int>(t[0]), py::cast<int>(t[1]), py::cast<int>(t[2]));
