@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aruco-nano"
+version = "0.1.0"
+description = "Python wrapper for ArUco Nano, a header-only ArUco marker detector"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "ColDSnit" }]
+dependencies = ["numpy", "opencv-contrib-python>=4.9"]
+
+[project.urls]
+Homepage = "https://github.com/ColDSnit/aruco_nano"
+Upstream = "https://github.com/rmsalinas/aruco_nano"
+
+[tool.setuptools]
+packages = ["aruco_nano"]
