@@ -66,6 +66,16 @@ static cv::Mat numpy_to_mat_f64(const py::array_t<double, py::array::c_style> &a
     throw std::runtime_error("matrix must be 1D or 2D float64");
 }
 
+// True if every element of a float64 Mat is finite (no NaN/inf).
+static bool mat_is_finite(const cv::Mat &m) {
+    for (int r = 0; r < m.rows; ++r) {
+        const double *row = m.ptr<double>(r);
+        for (int c = 0; c < m.cols; ++c)
+            if (!std::isfinite(row[c])) return false;
+    }
+    return true;
+}
+
 // Convert a cv::Mat (any supported depth/channels) into an owning NumPy array.
 static py::array mat_to_numpy(const cv::Mat &m) {
     const int depth = m.depth();
@@ -203,8 +213,19 @@ PYBIND11_MODULE(_aruco_nano, m) {
                  else if (K.rows == 9 && K.cols == 1) K = K.reshape(1, 3);
                  if (K.rows != 3 || K.cols != 3)
                      throw std::invalid_argument("camera_matrix must be 3x3 (or a flat 9-element vector)");
-                 if (marker_size <= 0.0)
-                     throw std::invalid_argument("marker_size must be positive");
+                 if (!mat_is_finite(K))
+                     throw std::invalid_argument("camera_matrix must contain only finite values");
+                 // Focal lengths (K[0][0], K[1][1]) must be positive; a zero or
+                 // negative focal length is a degenerate camera that OpenCV's
+                 // sqpnp solver rejects with a raw assertion.
+                 if (K.at<double>(0, 0) <= 0.0 || K.at<double>(1, 1) <= 0.0)
+                     throw std::invalid_argument("camera_matrix focal lengths must be positive");
+                 if (!std::isfinite(marker_size) || marker_size <= 0.0)
+                     throw std::invalid_argument("marker_size must be a positive finite number");
+                 // OpenCV's sqpnp solver requires the marker scale (marker_size/2)
+                 // to be >= 1e-7; reject absurdly small sizes below 1e-6 m (1 um).
+                 if (marker_size < 1e-6)
+                     throw std::invalid_argument("marker_size is too small (must be >= 1e-6 m)");
                  cv::Mat D = numpy_to_mat_f64(dist_coeffs);
                  // OpenCV accepts 4, 5, 8, 12 or 14 distortion coefficients,
                  // and requires a single row or column vector.
@@ -212,6 +233,8 @@ PYBIND11_MODULE(_aruco_nano, m) {
                  bool is_vector = (D.rows == 1 || D.cols == 1);
                  if (!is_vector || (ncoeff != 4 && ncoeff != 5 && ncoeff != 8 && ncoeff != 12 && ncoeff != 14))
                      throw std::invalid_argument("dist_coeffs must be a 1D vector of 4, 5, 8, 12 or 14 elements");
+                 if (!mat_is_finite(D))
+                     throw std::invalid_argument("dist_coeffs must contain only finite values");
                  auto pose = mk.estimatePose(K, D, marker_size);
                  return py::make_tuple(mat_to_numpy(pose.first), mat_to_numpy(pose.second));
              },

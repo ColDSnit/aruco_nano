@@ -210,6 +210,32 @@ def test_dist_coeffs_shape_validated():
     assert r.shape == (3, 1)
 
 
+def test_marker_size_finite_and_positive():
+    dict_id = cv2.aruco.DICT_6X6_250
+    img = _make_marker(dict_id, 3)
+    m = aruco_nano.detect(img, dict_id=dict_id)[0]
+    K = np.array([[500, 0, 150], [0, 500, 150], [0, 0, 1]], dtype=np.float64)
+    for bad in [0.0, -1.0, float("nan"), float("inf"), 1e-9]:
+        try:
+            m.estimate_pose(K, np.zeros(5), bad)
+            raise AssertionError("bad marker_size should be rejected")
+        except ValueError:
+            pass
+
+
+def test_degenerate_camera_matrix_rejected():
+    dict_id = cv2.aruco.DICT_6X6_250
+    img = _make_marker(dict_id, 3)
+    m = aruco_nano.detect(img, dict_id=dict_id)[0]
+    D = np.zeros(5, dtype=np.float64)
+    for badK in [np.zeros((3, 3)), np.full((3, 3), np.nan)]:
+        try:
+            m.estimate_pose(badK, D, 0.05)
+            raise AssertionError("degenerate camera matrix should be rejected")
+        except ValueError:
+            pass
+
+
 def test_marker_size_positive():
     dict_id = cv2.aruco.DICT_6X6_250
     img = _make_marker(dict_id, 3)
@@ -262,6 +288,8 @@ if __name__ == "__main__":
     test_marker_border_bits_must_be_one()
     test_dist_coeffs_shape_validated()
     test_marker_size_positive()
+    test_marker_size_finite_and_positive()
+    test_degenerate_camera_matrix_rejected()
     test_float_image_rejected()
     test_return_rejected()
     print("ALL TESTS PASSED")
