@@ -27,9 +27,9 @@
 namespace py = pybind11;
 
 // Convert a uint8 NumPy array (HxW grayscale or HxWx3 BGR) into a cv::Mat.
-static cv::Mat numpy_to_mat_u8(const py::array_t<uint8_t, py::array::c_style | py::array::forcecast> &a) {
-    // Reject non-uint8 input explicitly: forcecast would otherwise silently
-    // truncate float images (e.g. a [0,1] normalised image becomes all-black).
+static cv::Mat numpy_to_mat_u8(const py::array_t<uint8_t, py::array::c_style> &a) {
+    // Defensive: the binding declares uint8 without forcecast, so pybind11
+    // already rejects non-uint8 at the boundary; this guards the c_style path.
     if (a.dtype().kind() != 'u' || a.dtype().itemsize() != 1)
         throw std::invalid_argument("image must be uint8 (HxW grayscale or HxWx3 BGR)");
     py::buffer_info info = a.request();
@@ -49,7 +49,7 @@ static cv::Mat numpy_to_mat_u8(const py::array_t<uint8_t, py::array::c_style | p
 }
 
 // Convert a float64 NumPy array (1D or 2D) into a single-channel cv::Mat.
-static cv::Mat numpy_to_mat_f64(const py::array_t<double, py::array::c_style | py::array::forcecast> &a) {
+static cv::Mat numpy_to_mat_f64(const py::array_t<double, py::array::c_style> &a) {
     py::buffer_info info = a.request();
     if (info.ndim == 1) {
         cv::Mat m(1, (int)info.shape[0], CV_64FC1, info.ptr);
@@ -156,8 +156,8 @@ PYBIND11_MODULE(_aruco_nano, m) {
         .def_readonly("dict", &aruco_nano::Marker::dict)
         .def("estimate_pose",
              [](const aruco_nano::Marker &mk,
-                const py::array_t<double, py::array::c_style | py::array::forcecast> &camera_matrix,
-                const py::array_t<double, py::array::c_style | py::array::forcecast> &dist_coeffs,
+                const py::array_t<double, py::array::c_style> &camera_matrix,
+                const py::array_t<double, py::array::c_style> &dist_coeffs,
                 double marker_size) {
                  cv::Mat K = numpy_to_mat_f64(camera_matrix);
                  if (K.rows == 1 && K.cols == 9) K = K.reshape(1, 3);  // flat 9-vector -> 3x3
@@ -169,7 +169,7 @@ PYBIND11_MODULE(_aruco_nano, m) {
              "Estimate marker pose; returns (rvec, tvec) as float64 NumPy arrays.")
         .def("draw",
              [](const aruco_nano::Marker &mk,
-                const py::array_t<uint8_t, py::array::c_style | py::array::forcecast> &image,
+                const py::array_t<uint8_t, py::array::c_style> &image,
                 py::object color) {
                  cv::Mat img = numpy_to_mat_u8(image);  // already a clone
                  cv::Scalar c(0, 0, 255);
@@ -214,7 +214,7 @@ PYBIND11_MODULE(_aruco_nano, m) {
         }), py::arg("dicts"), py::arg("params") = py::none())
         .def("detect_markers",
              [](aruco_nano::ArucoDetector &self,
-                const py::array_t<uint8_t, py::array::c_style | py::array::forcecast> &image) {
+                const py::array_t<uint8_t, py::array::c_style> &image) {
                  cv::Mat img = numpy_to_mat_u8(image);
                  std::vector<std::vector<cv::Point2f>> corners;
                  std::vector<int> ids;
@@ -229,7 +229,7 @@ PYBIND11_MODULE(_aruco_nano, m) {
              "(4,2) float32 arrays and ids is an int32 array.")
         .def("detect_markers_multi_dict",
              [](aruco_nano::ArucoDetector &self,
-                const py::array_t<uint8_t, py::array::c_style | py::array::forcecast> &image) {
+                const py::array_t<uint8_t, py::array::c_style> &image) {
                  cv::Mat img = numpy_to_mat_u8(image);
                  std::vector<std::vector<cv::Point2f>> corners;
                  std::vector<int> ids, dict_indices;
@@ -245,7 +245,7 @@ PYBIND11_MODULE(_aruco_nano, m) {
 
     // --- Module-level detect() ---------------------------------------------
     m.def("detect",
-          [](const py::array_t<uint8_t, py::array::c_style | py::array::forcecast> &image,
+          [](const py::array_t<uint8_t, py::array::c_style> &image,
              py::object params, py::object dict_id, py::object dict_ids, bool return_rejected) -> py::object {
               cv::Mat img = numpy_to_mat_u8(image);
               aruco_nano::DetectorParameters p;
